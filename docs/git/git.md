@@ -55,7 +55,7 @@ what're the differences with csv? what're the benefits?
 ### 7. outro
 
 ### 8. 参考文献
-1. Git官方文档 [1]
+1. [Git官方文档](https://git-scm.com/docs) 
 
 [1]: https://git-scm.com/docs "Git官方文档"
 
