@@ -28,7 +28,126 @@ what're the differences with csv? what're the benefits?
 ### 4. how：git原理
 
 ### 5. how：git指令
+
+git add
+git status
+git diff
+git commit
+git note
+git restore
+git reset
+git rm
+git mv
+
+
+git checkout
+git switch
+git merge
+git mergetool
+git log
+git stash
+git tag
+git worktree
+
+git pull
+git push
+git remote
+git submodule
+
+git show
+git log
+git diff
+git difftool
+git range-diff
+git shortlog
+git describe
+
+git apply
+git cherry-pick
+git rebase
+git revert
+
+git bisect
+git blame
+
+git cat-file
+git check-ignore
+git checkout-index
+git commit-tree
+git count-objects
+git diff-index
+git for-each-ref
+git hash-object
+git ls-files
+git ls-tree
+git merge-base
+git read-tree
+git rev-list
+git rev-parse
+git show-ref
+git symbolic-ref
+git update-index
+git update-ref
+git verify-pack
+git write-tree
+
 #### 5.1 git basic
+1. **git init**
+
+    git init，创建一个空的git仓库，并在仓库中完成git database（.git）的创建，可以使用--object-format指定object的的hash算法（sha1 or sha256，默认sha1）
+    ```bash
+    git init
+    ```
+2. **git clone**
+
+    git clone，在
+    ```bash
+    git clone git://git.kernel.org/pub/scm/.../linux.git my-linux
+    ```
+3. **git branch**
+
+    git branch, 这个指令被用来查找，创建或删除branch
+    
+    当使用branch创建分支的时候，如果start-point在一个远程分支上面，那么会自动设置`branch.<name>.remote`和`branch.<name>.merge`，将star-point所在的分支标记为新分支的upstream
+    
+    upstream的用途是当使用`git status`或者`git version -v`的时候，可以获得两个分支的关系；当使用`git pull`的时候可以不需要指定对应的远程分支。
+    ```bash
+    ############## 以下参数可以随意组合 ###############
+    # 列举当前仓库中所有的branch
+    git branch
+    git branch --list
+    # 使用正则过滤
+    git branch --list [pattern]
+    # list中包含remote branch
+    git branch --remotes
+    # list中包含所有分支
+    git branch --all
+    # 列举当前仓库中包含HEAD的所有branch
+    git branch --contains
+    # 列举当前仓库中所有包含commit的branch
+    git branch --contains [commit-name]
+    # 列举不包含的
+    git branch --no-contains [commit-name]
+    # 列举当前仓库中所有从commit处可以到达的branch（可以想象为从上往下搜索）
+    git branch --merged [commit-name]
+    # 创建新branch
+    git branch [branch-name]
+    # 以某个commit为起点创建新branch
+    git branch [branch-name] [start-point]
+    # 以某两个分支的merge点为起点创建新branch
+    git branch [branch-name] A...B
+    # 以A分支和HEAD的merge点为起点创建新branch
+    git branch [branch-name] A...
+    # 修改分支名
+    git branch -m [old-branch-name] [new-branch-name]
+    # 删除分支
+    git branch -d [branch-name]
+    # 删除本地和远程分支(只有远程仓库已经没有这个分支的时候才能成功删除远程分支)
+    git branch -d -r [branch-name]
+    # 修改branch的upstream
+    git branch --set-upstream-to=[start-point] [branch-name]
+    ```
+4. git fetch
 
 #### 5.2 git advanced
 
