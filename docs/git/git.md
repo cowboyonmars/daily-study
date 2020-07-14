@@ -148,6 +148,7 @@ git write-tree
     git branch --set-upstream-to=[start-point] [branch-name]
     ```
 4. git fetch
+    
 
 #### 5.2 git advanced
 
@@ -174,7 +175,7 @@ git write-tree
 ### 7. outro
 
 ### 8. 参考文献
-1. [Git官方文档](https://git-scm.com/docs) 
+1. [Git Docs](https://git-scm.com/docs) 
+2. [Git User Manual](https://git-scm.com/docs/user-manual)
 
 [1]: https://git-scm.com/docs "Git官方文档"
-
