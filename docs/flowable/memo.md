@@ -22,3 +22,22 @@ FormTypeEnum
 如果variable和传进来的value有冲突怎么办呢？
 
 jsonNode边遍历边修改是一种非常差的选择
+
+event registry在什么情况下会stop consumer？什么情况下又会start consumer？
+start consumer:
+1. 启动的时候 handleChannelDefinition
+2. 部署的时候 cachingAndArtifactsManager.registerChannelModel
+stop consumer：
+1. 部署的时候 cachingAndArtifactsManager.unregister
+2. 定时任务 DefaultSpringEventRegistryChangeDetectionExecutor
+```
+protected long eventRegistryChangeDetectionInitialDelayInMs = 10000L;
+protected long eventRegistryChangeDetectionDelayInMs = 60000L;
+```
+定时任务默认60秒运行一次
+3. consumer自行中止？
+
+以某个字段A分组，找出分组中字段B最大的数据
+```sql
+select * from database_name alias where alias.B = (select max(B) from database_name where A = alias.A);
+```

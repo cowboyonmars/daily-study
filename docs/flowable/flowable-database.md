@@ -409,6 +409,7 @@ flowable engine中使用的表其命名都是具有规律的
 22. act_evt_log
 
 23. act_fo_form_definition
+
     act_fo_form_definition中存储着formDefinition信息。其功能和act_app_appdef类似，也是用在启动form实例上面。同时，也含有version字段，说明这张表保存的是最新版本的version信息。
     
     需要注意的是，这张表并没有和act_app_appdef类似的与其他表的外键关联。但是，类似的关系依然是存在的。
