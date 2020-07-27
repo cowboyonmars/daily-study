@@ -166,7 +166,7 @@ git write-tree
 1. 不要使用git reset --hard commit_name & git branch branch_name去创建一个branch。
 > in addition to losing any changes in the working directory, it will also remove all later commits from this branch. If this branch is the only branch containing those commits, they will be lost.
 
-介绍一下git的三种使用场景
+介绍一下git的三种使用场景 实际上是git workflow
 1. 开发全部在一个分支上
 2. 开发创建不同的分支，并在完成功能迭代后merge
 3. 开发使用fork repository的方式，在完成功能迭代并测试通过后再git pull
