@@ -41,3 +41,6 @@ protected long eventRegistryChangeDetectionDelayInMs = 60000L;
 ```sql
 select * from database_name alias where alias.B = (select max(B) from database_name where A = alias.A);
 ```
+
+发现重复的发布流程会让已经存在的consumer stop，在一次发布之后consumer的启动和关闭流程
+1. 
