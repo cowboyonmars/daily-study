@@ -28,7 +28,6 @@
 
 ### 如何编写 & 维护 Chart？
 Chart的编写和维护实际上就是对应用所需k8s资源定义文件的编写&维护。所以，维护chart需要对k8s有一定了解，特别是k8s的resource definition。
-
 先以enos sso server的chart为例说明一下chart的目录结构和对应的作用
 ```text
 enos-authz-service-orchestration
@@ -131,6 +130,11 @@ values文件是chart中预定义的配置，chart中的模板文件能够使用`
 需要注意的是，父chart中可以为属性指定scope，指定了scope后，父chart中的属性就可以传递向子chart。
 values文件中的scope分为两种`global`和`chart specific`,scope为`global`的属性可以被所有子chart获得，
 而scope为子chart名称的属性只能被特定的子chart获得。
+
+公司对values.yaml有一些额外的规定：
+1. chart中一定不能存放密码
+2. 全局变量统一定义了一些关键字，这些关键字在部署的时候会传入，不需要应用关心
+3. 一定需要运维填入的值，我们使用"@TODO"来代替，这样ecp在部署的时候会检测这个值有没有填入
 ```yaml
 # parent values
 global:
@@ -411,68 +415,78 @@ period * failThreshold应该等于应用可以容忍的请求异常时间，而s
 period * failThreshold应该要大于readiness probe的，表示pod在连续多长时间无法正常响应后应该重启pod。
 #### service.yaml
 ```helmyaml
-apiVersion: v1
-kind: Service
-metadata:
+apiVersion: v1 # service resource definition的api version，公司使用的apiVersion=v1
+kind: Service # k8s资源类型
+metadata: # k8s资源的metadata
   name: {{ .Chart.Name }}
-  labels:
+  labels: # ecp规定资源必须包含这三个label，ecp会使用这三个label来查找我们的应用，同时k8s内部也会使用这些label完成一些操作
     app: {{ .Chart.Name }}
     appVersion: {{ .Chart.AppVersion | quote }}
     chartVersion: {{ .Chart.Version | quote }}
 spec:
-  type: ClusterIP
+  type: ClusterIP # k8s的servie type，ClusterIP用于集群内部的pod访问，NodePort用于集群外部访问pod。ecp要求type应该为ClusterIP并且不要指定IP，并且禁止创建NodePort类型的service
   ports:
-  - name: http
-    port: 8080
-    protocol: TCP
-    targetPort: 8080
+  - name: http # 端口映射的名称
+    port: 8080 # service对外提供服务的端口
+    protocol: TCP # port映射使用的协议
+    targetPort: 8080 # 容器的端口
   - name: tcp-8099
     port: 8099
     protocol: TCP
     targetPort: 8099
-  selector:
+  selector: # selector，服务选择器，指定的是当前service管理哪些pods。
     app: {{ .Chart.Name }}
 ```
-
+公司对service.yaml有如下限制：
+1. apiVersion等于apiVersion: v1
+2. 只能以应用名称这个label作为selector
+3. spec.ports[i].targetPort需要填入数字，而不是字符串
+4. spec.type等于ClusterIP，同时不能指定sepc.clusterIP字段
+5. spec.type不能使用NodePort
 #### ingress.yaml
+ingress的作用类似于service的NodePort，ecp禁止直接将ip暴露给外部调用，所以我们需要为应用配置一个ingress作为反向代理。
 ```helmyaml
-apiVersion: extensions/v1beta1
-kind: Ingress
-metadata:
-  annotations:
+apiVersion: extensions/v1beta1 # ingress resource definition的api version，公司使用的apiVersion=extensions/v1beta1
+kind: Ingress # k8s资源类型
+metadata: # k8s资源的metadata
+  annotations: # 使用annotation对ingress进行配置
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
-  labels:
+  labels: # ecp规定资源必须包含这三个label，ecp会使用这三个label来查找我们的应用，同时k8s内部也会使用这些label完成一些操作
     app: {{ .Chart.Name }}
     appVersion: {{ .Chart.AppVersion | quote }}
     chartVersion: {{ .Chart.Version | quote }}
   name: {{ .Chart.Name }}
 spec:
-  rules:
-  - host: "enos-sso-server.{{ .Values.global.host }}"
-    http:
+  rules: # ingress使用的是基于规则的负载均衡
+  - host: "enos-sso-server.{{ .Values.global.host }}" # 服务域名
+    http: # ingress整体的配置和nginx很像，就是将特定路径的访问映射到对应的service上面去
       paths:
       - backend:
           serviceName: {{ .Chart.Name }}
           servicePort: 8080
         path: /
 ```
-
+公司对ingress.yaml有如下限制：
+1. apiVersion等于extensions/v1beta1
+2. spec.rules[i].http.paths[j].backend.service.port需要填入数字
+3. 超时时间的annotation，k8s和openshift不同，需要添加判断，否则可能会报错
 #### pvc.yaml
+
 ```helmyaml
 {{- if and .Values.persistence.enabled  }}
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
+apiVersion: v1 # pvc resource definition的api version，公司使用的apiVersion=v1
+kind: PersistentVolumeClaim # k8s资源类型
+metadata: # k8s资源的metadata
   labels:
     app: {{ .Chart.Name | quote }}
   name: {{ .Values.persistence.name | quote }}
 spec:
-  accessModes:
+  accessModes: # pvc的访问模式，ReadWriteMany/ReadWriteOnce，ReadWriteMany指这个volume能够被多个节点挂载，访问模式为read/write；ReadWriteOnly指这个volume只能被一个节点挂载
     - {{ .Values.persistence.accessMode }}
   resources:
     requests:
-      storage: {{ .Values.persistence.size | quote }}
-  storageClassName: {{ .Values.storageClassName | quote }}
+      storage: {{ .Values.persistence.size | quote }} # storage的大小
+  storageClassName: {{ .Values.storageClassName | quote }} # storage类型
   {{- end }}
 ```
 #### lion-init.yaml && lion-configmap.yaml
@@ -571,8 +585,8 @@ spec:
         {{- end }}
 {{- end }}
 ```
-
 #### lion properties file
+
 ```properties
 enos-authz-service.wellKnowIssuerUrl=${ISS_URL}
 enos-authz-service.devPortalUrl=http://enos-iam-bff.${CLUSTER_NAME}.eniot.io
