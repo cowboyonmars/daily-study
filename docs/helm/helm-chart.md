@@ -471,7 +471,7 @@ spec:
 2. spec.rules[i].http.paths[j].backend.service.port需要填入数字
 3. 超时时间的annotation，k8s和openshift不同，需要添加判断，否则可能会报错
 #### pvc.yaml
-
+pvc是声明应用持久化存储的资源定义文件，当应用需要挂载持久化卷时，我们就需要为应用添加pvc资源文件
 ```helmyaml
 {{- if and .Values.persistence.enabled  }}
 apiVersion: v1 # pvc resource definition的api version，公司使用的apiVersion=v1
@@ -489,49 +489,55 @@ spec:
   storageClassName: {{ .Values.storageClassName | quote }} # storage类型
   {{- end }}
 ```
+公司对pvc.yaml有如下限制：
+1. 需要为模板文件添加条件语句
+2. 集群的storage不会因为chart部署而删除。所以，当集群内存在同名的storage的时候，部署会报错
+3. 当集群内存在同名的storage，要么更换chart storage的名称；要么将persistence.enabled关闭，让应用使用已有的storage
 #### lion-init.yaml && lion-configmap.yaml
+lion-init.yaml & lion-configmap.yaml是ecp自定义的chart hook，主要作用是帮助在chart部署的同时完成lion的更新
+对于`helm`来说，hook实际上就是**添加了特定annotation的k8s资源模板文件**
 ```yaml
 {{- if and .Values.global.lion.init .Values.lion.init }}
 apiVersion: v1
-kind: ConfigMap
+kind: ConfigMap # 该hook定义了一个configmap，用来存放我们的lion properties
 metadata:
   name: "{{ .Chart.Name }}-lion-init-configmap"
-  annotations:
-    "helm.sh/hook": pre-install,pre-upgrade,pre-rollback
+  annotations: # hook相关的annotation
+    "helm.sh/hook": pre-install,pre-upgrade,pre-rollback # 定义hook的启动时间，发布前/升级前/回滚前
     "helm.sh/resource-policy": keep
-    "helm.sh/hook-weight": "1"
-    "helm.sh/hook-delete-policy": before-hook-creation
-data:
+    "helm.sh/hook-weight": "1" # 定义hook的执行顺序
+    "helm.sh/hook-delete-policy": before-hook-creation # 定义hook资源的销毁时间，在下一次hook执行前销毁
+data: # 将files/lion中的所有文件放入configmap的data中
 {{- if .Files.Glob "files/lion/*.{properties}" }}
 {{ (.Files.Glob "files/lion/*.{properties}").AsConfig | indent 2 }}
 {{- end }}
 {{- end }}
 ```
-```yaml
+```helmyaml
 {{- if and .Values.global.lion.init .Values.lion.init }}
 apiVersion: batch/v1
-kind: Job
+kind: Job # 该hook定义了一个job，用来完成lion的更新，Job是k8s的controller之一，Job对象通常用于运行那些仅需要执行一次的任务（例如数据库迁移，批处理脚本等等）
 metadata:
   name: "{{ .Chart.Name }}-lion-init"
-  annotations:
-    "helm.sh/hook": pre-install,pre-upgrade,pre-rollback
-    "helm.sh/hook-weight": "2"
-    "helm.sh/hook-delete-policy": before-hook-creation
+  annotations: # hook相关的annotation
+    "helm.sh/hook": pre-install,pre-upgrade,pre-rollback # 定义hook的启动时间，发布前/升级前/回滚前
+    "helm.sh/hook-weight": "2" # 定义hook的执行顺序，在configmap执行之后再执行
+    "helm.sh/hook-delete-policy": before-hook-creation # 定义hook资源的销毁时间，在下一次hook执行前销毁
   labels:
     app: {{ .Chart.Name }}
     appVersion: {{ .Chart.AppVersion }}
     chartVersion: {{ .Chart.Version }}
 spec:
-  backoffLimit: 0
-  completions: 1
-  parallelism: 1
+  backoffLimit: 0 # job的容错次数，当pod失败后会新建pod，当失败次数达到容错上限后job运行失败
+  completions: 1 # 这个参数用来指定对应的pod需要被成功执行多少次，由于我们是更新lion，所以只需要执行一次
+  parallelism: 1 # 并发执行的pod数
   template:
     metadata:
       name: "{{ .Chart.Name }}-lion-init"
       labels:
         app: {{ .Chart.Name }}
     spec:
-      restartPolicy: Never
+      restartPolicy: Never # pod重启策略，always：容器失效时自动重启pod；onFailure：容器终止运行，且退出码不为1时，重启pod；Never：永远不会重启pod
       containers:
       - args:
         - -l
@@ -539,7 +545,7 @@ spec:
         - ./init.sh
         command:
         - /bin/bash
-        env:
+        env: # 执行lion更新任务的程序需要的环境变量
         - name: LION_HOST
           value: {{ $.Values.global.lion.url | quote }}
         - name: BASE_HOST
@@ -562,22 +568,22 @@ spec:
         - name: {{ $key }}
           value: {{ $value | quote }}
     {{- end }}
-        image: "{{ $.Values.global.harbor.host}}/op/lion-init:{{ $.Values.global.lion.tag }}"
-        imagePullPolicy: IfNotPresent
+        image: "{{ $.Values.global.harbor.host}}/op/lion-init:{{ $.Values.global.lion.tag }}" # lion更新程序的image
+        imagePullPolicy: IfNotPresent # 镜像拉取策略
         name: "{{ .Chart.Name }}-lion-init"
-        resources:
+        resources: # pod资源定义
           limits:
             cpu: 2048m
             memory: 4Gi
           requests:
             cpu: 100m
             memory: 200Mi
-        volumeMounts:
+        volumeMounts: # 将lion properties文件挂载在pod的/lion目录下
           {{- if .Files.Glob "files/lion/*.{properties}" }}
           - name: lion-files
             mountPath: /lion
           {{- end}}
-      volumes:
+      volumes: # 将configmap中的文件放入一个持久化卷中
         {{- if .Files.Glob "files/lion/*.{properties}" }}
         - name: lion-files
           configMap:
@@ -586,7 +592,8 @@ spec:
 {{- end }}
 ```
 #### lion properties file
-
+ecp chart使用一个properties文件来存放项目的lion配置，properties文件中可以使用环境变量将需要运维配置的值抽离出来。
+需要注意的是，lion properties文件的名称必需要是lion中的项目名称，如果chart的名称和lion的项目名称不一致，我们应该**以lion中的项目名称为准**
 ```properties
 enos-authz-service.wellKnowIssuerUrl=${ISS_URL}
 enos-authz-service.devPortalUrl=http://enos-iam-bff.${CLUSTER_NAME}.eniot.io
@@ -597,19 +604,25 @@ enos-authz-service.maxInactiveInterval=${SESSION_TTL}
 enos-authz-service.alwaysRemember=${REMEMBER_ME_FLAG}
 enos-authz-service.aes.key=${AES_KEY}
 ```
+公司对lion hook有以下规范和要求，参照公司wiki：
+http://wiki.envisioncn.com/pages/viewpage.action?pageId=13727895
 
+需要了解lion hook的执行逻辑的，可以查找lion hook的源码：
+http://git.envisioncn.com/apaas/lion-init
 #### db-init.yaml && db-configmap.yaml
+db-init.yaml & db-configmap.yaml是ecp自定义的chart hook，主要作用是帮助在chart部署的同时完成数据库的更新
+不同于使用liquibase等数据库版本控制工具，changelog来记录已经发生了的数据库操作。ecp内部是以应用版本为基准执行sql脚本的
 ```helmyaml
 {{- if .Values.db.init }}
 apiVersion: v1
-kind: ConfigMap
+kind: ConfigMap # 该hook定义了一个configmap，用来存储sql文件
 metadata:
   name: "{{ .Chart.Name }}-db-init-configmap"
-  annotations:
-    "helm.sh/hook": pre-install,pre-upgrade,pre-rollback
-    "helm.sh/hook-weight": "8"
-    "helm.sh/hook-delete-policy": before-hook-creation
-data:
+  annotations: # hook相关的annotation
+    "helm.sh/hook": pre-install,pre-upgrade,pre-rollback # 定义hook的启动时间，发布前/升级前/回滚前
+    "helm.sh/hook-weight": "8" # 定义hook的执行顺序
+    "helm.sh/hook-delete-policy": before-hook-creation # 定义hook资源的销毁时间，在下一次hook执行前销毁
+data: # 将files/sql中的所有文件放入configmap中的data中
 {{- if .Files.Glob "files/sql/*.{sql}" }}
 {{ (.Files.Glob "files/sql/*.{sql}").AsConfig | indent 2 }}
 {{- end }}
@@ -618,25 +631,25 @@ data:
 ```helmyaml
 {{- if  and .Values.global.db.init .Values.db.init }}
 apiVersion: batch/v1
-kind: Job
+kind: Job # 该hook定义了一个job，用来完成数据库更新的操作
 metadata:
   name: "{{ .Chart.Name }}-db-init"
-  annotations:
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "21"
-    "helm.sh/hook-delete-policy": before-hook-creation
+  annotations: # hook annotation
+    "helm.sh/hook": pre-install,pre-upgrade # 定义hook的启动时间，发布前/升级前
+    "helm.sh/hook-weight": "21" # 定义hook的执行顺序，在db-configmap之后执行该hook
+    "helm.sh/hook-delete-policy": before-hook-creation # 定义hook资源的销毁时间，在下一次hook执行前销毁
 spec:
-  backoffLimit: 0
-  completions: 1
-  ttlSecondsAfterFinished: 3600
-  parallelism: 1
+  backoffLimit: 0 # job的容错次数，当pod失败后会新建pod，当失败次数达到容错上限后job运行失败
+  completions: 1 # 这个参数用来指定对应的pod需要被成功执行多少次，由于我们是更新lion，所以只需要执行一次
+  ttlSecondsAfterFinished: 3600 # job执行完后等待10min，删除资源
+  parallelism: 1 # 并发执行的pod数
   template:
     metadata:
       name: "{{ .Chart.Name }}-db-init"
       labels:
         app: {{ .Chart.Name }}
     spec:
-      restartPolicy: Never
+      restartPolicy: Never # pod重启策略，always：容器失效时自动重启pod；onFailure：容器终止运行，且退出码不为1时，重启pod；Never：永远不会重启pod
       containers:
       - args:
         - -l
@@ -644,7 +657,7 @@ spec:
         - ./init.sh
         command:
         - /bin/bash
-        env:
+        env: # 执行数据库更新的应用所需的环境变量
         - name: LION_HOST
           value: {{ $.Values.global.lion.url | quote }}
         - name: LION_ENV
@@ -666,19 +679,19 @@ spec:
         image: "{{ $.Values.global.harbor.host}}/op/db-init:{{$.Values.global.db.tag}}"
         imagePullPolicy: IfNotPresent
         name: "{{ .Chart.Name }}-db-init"
-        resources:
+        resources: # 定义pod资源
           limits:
             cpu: 2048m
             memory: 4Gi
           requests:
             cpu: 100m
             memory: 200Mi
-        volumeMounts:
+        volumeMounts: # 将sql文件挂载在pod的/sql/{{ .Chart.Name }}目录下
           {{- if .Files.Glob "files/sql/*.{sql}" }}
           - name: sql
             mountPath: /sql/{{ .Chart.Name }}
           {{- end}}
-      volumes:
+      volumes: # 将configmap中的文件放入一个持久化卷中
         {{- if .Files.Glob "files/sql/*.{sql}" }}
         - name: sql
           configMap:
@@ -687,6 +700,7 @@ spec:
 {{- end }}
 ```
 #### sql file
+以下是sso server在2.1.7版本的sql文件
 ```sql
 # enos-sso-server 7月份版本部署sql
 
@@ -723,11 +737,103 @@ set @prepareAddColumnStmt = (select if(
 prepare addColumn from @prepareAddColumnStmt;
 execute addColumn;
 ```
+对于db hook公司有如下要求：
+1. 使用db hook要求应用要接入lion中的DB-Mysql配置，并且配置项的名称要和chart名称保持一直
+2. migrateAppVersion指的是从常规部署迁移到chart部署的app版本，sql会从migrateAppVersion的后一个版本开始执行
+具体的sql执行逻辑 & 接入步骤可以参照wiki：
+http://wiki.envisioncn.com/pages/viewpage.action?pageId=15242803
+3. 文件序号以整数向上严格递增，不允许跳过某个数字.
+    
+    错误：0，1，3，4，5...
+    
+    正确：0，1，2，3，4...
+4. 文件序号后跟sql的版本号，版本号需要和Chart的appVersion使用同样的规则，例如：2.1.2，2.1.3...
+5. 因为db hook是以版本号作为区分来执行sql文件的，那么如果部署失败了，可能同一个sql文件需要再次执行一次，这就可能会使得原本正确的sql语句抛出错误（duplicated）。
+所以我们需要尽量保证执行的sql语句具有`幂等性`，这样即使重复执行多次，依然不会报错。
+下面提供一些例子，方便对sql进行改造
+    * 创建table，使用create if not exists
+    * 插入metadata的时候，先判断是否存在
+        ```sql
+        -- 比如 ：role_name为role.project.developer的数据只允许插入一次 --
+        INSERT INTO `t_role`(`role_name`, `role_type`, `is_system_role`)
+        SELECT 'role.project.developer', '1', '1'FROM DUAL
+        WHERE NOT EXISTS (
+            SELECT `role_name` FROM `t_role` WHERE role_name='role.project.developer'
+        );
+        ```
+    * 修改table column的时候，判断 new column not exist & old column exist
+        ```sql
+        set @dbname = database();
+        set @tablename = 'enos_user_federation_provider';
+        set @oldcolumnname = "admin_credential";
+        set @columnname = "bind_credential";
+        set @definition = "varchar(64) default '' comment 'ldap认证源admin credential'";
+        set @prepareChangeColumnStmt = (select if(
+                                                               (select count(*)
+                                                                from INFORMATION_SCHEMA.COLUMNS
+                                                                where table_name = @tablename
+                                                                  and table_schema = @dbname
+                                                                  and column_name = @oldcolumnname) = 0 ||
+                                                               (select count(*)
+                                                                from INFORMATION_SCHEMA.COLUMNS
+                                                                where table_name = @tablename
+                                                                  and table_schema = @dbname
+                                                                  and column_name = @columnname) > 0,
+                                                               'select 1',
+                                                               concat('alter table ', @tablename, ' change ', @oldcolumnname, ' ',
+                                                                      @columnname, ' ', @definition, ';')
+                                                   )
+        );
+        prepare changeColumn from @prepareChangeColumnStmt;
+        execute changeColumn;
+        ```
+    * 新建table column的时候，判断new column not exist
+        ```sql
+        set @dbname = database();
+        set @tablename = 'enos_user_federation_provider';
+        set @columnname = "custom_filter";
+        set @definition = "varchar(512) default '' null comment 'ldap条目过滤条件'";
+        set @prepareAddColumnStmt = (select if(
+                                                        (select count(*)
+                                                         from INFORMATION_SCHEMA.COLUMNS
+                                                         where table_name = @tablename
+                                                           and table_schema = @dbname
+                                                           and column_name = @columnname) > 0,
+                                                        'select 1',
+                                                        concat('alter table ', @tablename, ' add ', @columnname, ' ',
+                                                               @definition, ';')
+                                                ));
+        prepare addColumn from @prepareAddColumnStmt;
+        execute addColumn;
+        ```
+6. sql文件中禁止使用drop
+7. sql文件需要符合平台mysql设计的规范，http://wiki.envisioncn.com/pages/viewpage.action?pageId=13655831
+8. 需要了解sql是如何更新的，可以查看对应的项目源码：
+http://git.envisioncn.com/apaas/db-init
 
 ### 使用Helm的过程中有哪些坑？
 1. yaml缩进
+    
+    yaml是一种使用缩进来表示层次结构的语言，但是yaml是使用空格来表示缩进的，因此在书写yaml的时候不要使用tab，否则可能会导致chart运行出错
+2. 在chart的版本文件中如果使用了某个值 ({{ .Values.Some.Value }})，那么我们要保证在父chart和子chart中都存在对应的配置项，否则部署会出错
+    ![values file error](.helm-chart_images/values-file-error.png)
+3. 如果chart部署的错误发生在资源创建等环节，我们没有办法在发布页面看到准确的错误信息，因此需要跳转到k8s控制台查看错误
+    ![k8s-error](.helm-chart_images/k8s-error.png)
+    k8s dashboard alpha: https://alpha-k8s-cn4.eniot.io:30000/#!/login
+    
+    k8s dashboard beta: https://beta-k8s-cn4.eniot.io:30000/#/login
+    
+    dashboard token：http://wiki.envisioncn.com/pages/viewpage.action?pageId=9404308
 ### 推荐插件
-
+* Kubernetes(k8s 资源文件yaml语法)
+    https://plugins.jetbrains.com/plugin/10485-kubernetes/
+* Go Template(Chart 预渲染)
+    https://plugins.jetbrains.com/plugin/10581-go-template/
 
 ### 参考文档
+1. [Helm官方文档](https://helm.sh/docs/)
+2. [Charts](https://helm.sh/docs/topics/charts/)
+3. [Chart Hooks](https://helm.sh/docs/topics/charts_hooks/)
+4. [K8s官方文档](https://kubernetes.io/docs/home/)
+5. [Chart部署中的坑](http://wiki.envisioncn.com/pages/viewpage.action?pageId=15307829)
 
